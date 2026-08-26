@@ -401,7 +401,7 @@ function SendListForm({
           rows: [
             {
               reply_id: `row_${totalRows + 1}`,
-              title: `Option ${totalRows + 1}`,
+              title: t("defaultRowTitle", { number: totalRows + 1 }),
               next_node_key: "",
             },
           ],

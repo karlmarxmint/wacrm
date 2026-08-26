@@ -310,6 +310,7 @@ export function FlowEditorProvider({
   }, [dirty]);
 
   // ---- Validation ----
+  const tValidate = useTranslations("Flows.validate");
   const issues = useMemo<ValidationIssue[]>(
     () =>
       validateFlowForActivation(
@@ -320,8 +321,9 @@ export function FlowEditorProvider({
           entry_node_id: state.entry_node_id,
         },
         state.nodes,
+        tValidate,
       ),
-    [state],
+    [state, tValidate],
   );
   const canActivate = useMemo(
     () => issues.every((i) => i.severity !== "error"),
@@ -346,17 +348,19 @@ export function FlowEditorProvider({
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        throw new Error(json.error ?? `Save failed: ${res.status}`);
+        throw new Error(
+          json.error ?? t("saveFailedWithStatus", { status: res.status }),
+        );
       }
       setDirty(false);
       toast.success(t("saved"));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Save failed";
+      const msg = err instanceof Error ? err.message : t("saveFailed");
       toast.error(msg);
     } finally {
       setSaving(false);
     }
-  }, [initialFlow.id, state]);
+  }, [initialFlow.id, state, t]);
 
   // ---- Activate / Pause / Archive ----
   const setStatus = useCallback(
@@ -380,7 +384,10 @@ export function FlowEditorProvider({
         });
         if (!res.ok) {
           const json = await res.json().catch(() => ({}));
-          throw new Error(json.error ?? `Status update failed: ${res.status}`);
+          throw new Error(
+            json.error ??
+              t("statusUpdateFailedWithStatus", { status: res.status }),
+          );
         }
         setStateRaw((s) => ({ ...s, status: next }));
         toast.success(
@@ -391,32 +398,32 @@ export function FlowEditorProvider({
               : t("statusDraft")
         );
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Status update failed";
+        const msg =
+          err instanceof Error ? err.message : t("statusUpdateFailed");
         toast.error(msg);
       } finally {
         setActivating(false);
       }
     },
-    [canActivate, save, initialFlow.id],
+    [canActivate, save, initialFlow.id, t],
   );
 
   // ---- Delete ----
   const deleteFlow = useCallback(async () => {
-    const yes = window.confirm(
-      `Delete "${state.name}"? Any active runs end immediately. This can't be undone.`,
-    );
+    const yes = window.confirm(t("deleteConfirm", { name: state.name }));
     if (!yes) return;
     try {
       const res = await fetch(`/api/flows/${initialFlow.id}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+      if (!res.ok)
+        throw new Error(t("deleteFailedWithStatus", { status: res.status }));
       router.push("/flows");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Delete failed";
+      const msg = err instanceof Error ? err.message : t("deleteFailed");
       toast.error(msg);
     }
-  }, [initialFlow.id, router, state.name]);
+  }, [initialFlow.id, router, state.name, t]);
 
   // ---- Node mutations ----
   const updateNode = useCallback(
