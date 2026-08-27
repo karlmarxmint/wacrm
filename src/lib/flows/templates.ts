@@ -110,15 +110,15 @@ function resolveWelcomeMenu(t: Translator): FlowTemplate {
         .filter(Boolean),
       match_type: "contains",
     },
-    entry_node_id: "start",
+    entry_node_id: "inicio",
     nodes: [
       {
-        node_key: "start",
+        node_key: "inicio",
         node_type: "start",
-        config: { next_node_key: "welcome" },
+        config: { next_node_key: "boas_vindas" },
       },
       {
-        node_key: "welcome",
+        node_key: "boas_vindas",
         node_type: "send_buttons",
         config: {
           text: t("welcome_menu.welcomeText"),
@@ -127,25 +127,25 @@ function resolveWelcomeMenu(t: Translator): FlowTemplate {
             {
               reply_id: "existing",
               title: t("welcome_menu.existingButtonTitle"),
-              next_node_key: "existing_handoff",
+              next_node_key: "cliente_existente",
             },
             {
               reply_id: "new",
               title: t("welcome_menu.newButtonTitle"),
-              next_node_key: "new_handoff",
+              next_node_key: "cliente_novo",
             },
           ],
         } as SendButtonsNodeConfig,
       },
       {
-        node_key: "existing_handoff",
+        node_key: "cliente_existente",
         node_type: "handoff",
         config: {
           note: t("welcome_menu.existingHandoffNote"),
         } as HandoffNodeConfig,
       },
       {
-        node_key: "new_handoff",
+        node_key: "cliente_novo",
         node_type: "handoff",
         config: {
           note: t("welcome_menu.newHandoffNote"),
@@ -172,15 +172,15 @@ function resolveFaqBot(t: Translator): FlowTemplate {
         .filter(Boolean),
       match_type: "contains",
     },
-    entry_node_id: "start",
+    entry_node_id: "inicio",
     nodes: [
       {
-        node_key: "start",
+        node_key: "inicio",
         node_type: "start",
-        config: { next_node_key: "topics" },
+        config: { next_node_key: "assuntos" },
       },
       {
-        node_key: "topics",
+        node_key: "assuntos",
         node_type: "send_list",
         config: {
           text: t("faq_bot.topicsText"),
@@ -192,17 +192,17 @@ function resolveFaqBot(t: Translator): FlowTemplate {
                 {
                   reply_id: "hours",
                   title: t("faq_bot.hoursRowTitle"),
-                  next_node_key: "answer_hours",
+                  next_node_key: "resposta_horario",
                 },
                 {
                   reply_id: "pricing",
                   title: t("faq_bot.pricingRowTitle"),
-                  next_node_key: "answer_pricing",
+                  next_node_key: "resposta_precos",
                 },
                 {
                   reply_id: "refunds",
                   title: t("faq_bot.refundsRowTitle"),
-                  next_node_key: "answer_refunds",
+                  next_node_key: "resposta_reembolso",
                 },
               ],
             },
@@ -212,7 +212,7 @@ function resolveFaqBot(t: Translator): FlowTemplate {
                 {
                   reply_id: "human",
                   title: t("faq_bot.humanRowTitle"),
-                  next_node_key: "human_handoff",
+                  next_node_key: "atendimento_humano",
                 },
               ],
             },
@@ -220,38 +220,38 @@ function resolveFaqBot(t: Translator): FlowTemplate {
         } as SendListNodeConfig,
       },
       {
-        node_key: "answer_hours",
+        node_key: "resposta_horario",
         node_type: "send_message",
         config: {
           text: t("faq_bot.hoursAnswerText"),
-          next_node_key: "end",
+          next_node_key: "fim",
         } as SendMessageNodeConfig,
       },
       {
-        node_key: "answer_pricing",
+        node_key: "resposta_precos",
         node_type: "send_message",
         config: {
           text: t("faq_bot.pricingAnswerText"),
-          next_node_key: "end",
+          next_node_key: "fim",
         } as SendMessageNodeConfig,
       },
       {
-        node_key: "answer_refunds",
+        node_key: "resposta_reembolso",
         node_type: "send_message",
         config: {
           text: t("faq_bot.refundsAnswerText"),
-          next_node_key: "end",
+          next_node_key: "fim",
         } as SendMessageNodeConfig,
       },
       {
-        node_key: "human_handoff",
+        node_key: "atendimento_humano",
         node_type: "handoff",
         config: {
           note: t("faq_bot.humanHandoffNote"),
         } as HandoffNodeConfig,
       },
       {
-        node_key: "end",
+        node_key: "fim",
         node_type: "end",
         config: {},
       },
@@ -270,50 +270,50 @@ function resolveLeadCapture(t: Translator): FlowTemplate {
     icon: "UserPlus",
     trigger_type: "first_inbound_message",
     trigger_config: {},
-    entry_node_id: "start",
+    entry_node_id: "inicio",
     nodes: [
       {
-        node_key: "start",
+        node_key: "inicio",
         node_type: "start",
-        config: { next_node_key: "intro" },
+        config: { next_node_key: "introducao" },
       },
       {
-        node_key: "intro",
+        node_key: "introducao",
         node_type: "send_message",
         config: {
           text: t("lead_capture.introText"),
-          next_node_key: "ask_name",
+          next_node_key: "perguntar_nome",
         } as SendMessageNodeConfig,
       },
       {
-        node_key: "ask_name",
+        node_key: "perguntar_nome",
         node_type: "collect_input",
         config: {
           prompt_text: t("lead_capture.askNamePrompt"),
           var_key: "name",
-          next_node_key: "ask_email",
+          next_node_key: "perguntar_email",
         } as CollectInputNodeConfig,
       },
       {
-        node_key: "ask_email",
+        node_key: "perguntar_email",
         node_type: "collect_input",
         config: {
           prompt_text: t.raw("lead_capture.askEmailPrompt"),
           var_key: "email",
-          next_node_key: "ask_company",
+          next_node_key: "perguntar_empresa",
         } as CollectInputNodeConfig,
       },
       {
-        node_key: "ask_company",
+        node_key: "perguntar_empresa",
         node_type: "collect_input",
         config: {
           prompt_text: t("lead_capture.askCompanyPrompt"),
           var_key: "company",
-          next_node_key: "handoff",
+          next_node_key: "atendimento",
         } as CollectInputNodeConfig,
       },
       {
-        node_key: "handoff",
+        node_key: "atendimento",
         node_type: "handoff",
         config: {
           note: t.raw("lead_capture.handoffNote"),
