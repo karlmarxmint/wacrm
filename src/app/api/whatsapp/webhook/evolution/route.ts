@@ -95,6 +95,31 @@ interface EvolutionMessage {
   stickerMessage?: EvolutionMediaPart
   contextInfo?: { stanzaId?: string; stanzaID?: string }
   protocolMessage?: { type?: string }
+  // Tap on a send_buttons node's quick-reply button. Field names mirror
+  // whatsmeow's own protobuf JSON tags (waE2E.ButtonsResponseMessage) —
+  // confirmed against the evolution-go binary's embedded swagger schema,
+  // not guessed, since this codebase's assumptions about Evolution Go's
+  // payload shape have been wrong before (see uploadInlineMedia's history).
+  buttonsResponseMessage?: {
+    selectedButtonID?: string
+    selectedDisplayText?: string
+    contextInfo?: { stanzaId?: string; stanzaID?: string }
+  }
+  // Tap on a send_list node's row.
+  listResponseMessage?: {
+    singleSelectReply?: { selectedRowID?: string }
+    title?: string
+    contextInfo?: { stanzaId?: string; stanzaID?: string }
+  }
+  // Quick-reply tap on a template message (parity with Meta's `button`
+  // envelope) — not currently sent by any wacrm flow/broadcast node, but
+  // whatsmeow delivers it under this shape when a customer's client
+  // still renders an older-style template button.
+  templateButtonReplyMessage?: {
+    selectedID?: string
+    selectedDisplayText?: string
+    contextInfo?: { stanzaId?: string; stanzaID?: string }
+  }
 }
 
 interface EvolutionMessageData {
@@ -228,6 +253,17 @@ async function processEvolutionEvent(
       return processEvolutionMessage(body.data as EvolutionMessageData, config)
     case 'Receipt':
       return processEvolutionReceipt(body.data as EvolutionReceiptData, body.state, config)
+    case 'ButtonClick':
+      // Evolution Go dispatches this as a convenience event ALONGSIDE a
+      // regular 'Message' event for the same tap (confirmed live: the two
+      // arrive back-to-back for one button press) — the 'Message' event's
+      // `buttonsResponseMessage`/`listResponseMessage`/
+      // `templateButtonReplyMessage` handling in extractContent above is
+      // what actually records the reply and advances the flow. Handling
+      // both would double-insert the message and double-advance the run,
+      // so this one is a deliberate no-op, not a dropped event.
+      return
+
     case 'PairSuccess':
     case 'Connected':
       // 'PairSuccess' is the initial QR pairing; 'Connected' fires on
@@ -286,6 +322,15 @@ interface ExtractedContent {
   /** MIME type of the media part, for the base64 upload path below. */
   mimeType: string | null
   fileName: string | null
+  /**
+   * Stable id of a tapped send_buttons/send_list button or row (the
+   * `reply_id` the flow author picked), when this message is an
+   * interactive reply. Undefined for every other content type — mirrors
+   * `interactiveReplyId` in the Meta webhook route so the Flows engine,
+   * `messages.interactive_reply_id`, and the `interactive_reply`
+   * automation trigger all treat both providers identically.
+   */
+  interactiveReplyId?: string | null
 }
 
 function extractContent(message: EvolutionMessage): ExtractedContent | null {
@@ -348,6 +393,58 @@ function extractContent(message: EvolutionMessage): ExtractedContent | null {
       fileName: message.stickerMessage.fileName || null,
     }
   }
+
+  // Interactive replies — the customer tapped a button or list row on a
+  // message a Flow (or broadcast) previously sent. Use the visible label
+  // as contentText so the inbox bubble renders the tap legibly, and
+  // stash the stable id separately (interactiveReplyId) so the Flows
+  // engine can route on it, same split as the Meta webhook's `interactive`
+  // case. Before this, none of these three were recognized at all —
+  // extractContent returned null, the customer's tap never got a
+  // `messages` row, and the active flow run never advanced (confirmed
+  // live: "unrecognized message content, skipping" immediately followed
+  // by "unhandled event type: ButtonClick" for the same tap).
+  if (message.buttonsResponseMessage) {
+    const r = message.buttonsResponseMessage
+    if (r.selectedButtonID) {
+      return {
+        contentType: 'interactive',
+        contentText: r.selectedDisplayText || r.selectedButtonID,
+        mediaUrl: null,
+        mimeType: null,
+        fileName: null,
+        interactiveReplyId: r.selectedButtonID,
+      }
+    }
+  }
+  if (message.listResponseMessage) {
+    const r = message.listResponseMessage
+    const rowId = r.singleSelectReply?.selectedRowID
+    if (rowId) {
+      return {
+        contentType: 'interactive',
+        contentText: r.title || rowId,
+        mediaUrl: null,
+        mimeType: null,
+        fileName: null,
+        interactiveReplyId: rowId,
+      }
+    }
+  }
+  if (message.templateButtonReplyMessage) {
+    const r = message.templateButtonReplyMessage
+    if (r.selectedID) {
+      return {
+        contentType: 'interactive',
+        contentText: r.selectedDisplayText || r.selectedID,
+        mediaUrl: null,
+        mimeType: null,
+        fileName: null,
+        interactiveReplyId: r.selectedID,
+      }
+    }
+  }
+
   return null
 }
 
@@ -618,6 +715,11 @@ async function processEvolutionMessage(
     status: 'delivered',
     created_at: createdAt,
     reply_to_message_id: replyToInternalId,
+    // Only populated for content_type='interactive' — see extractContent's
+    // buttonsResponseMessage/listResponseMessage/templateButtonReplyMessage
+    // handling above. Null for every other content_type, same as the Meta
+    // webhook route's use of this column.
+    interactive_reply_id: content.interactiveReplyId ?? null,
   })
   if (msgError) {
     console.error('[evolution-webhook] error inserting message:', msgError)
@@ -638,13 +740,21 @@ async function processEvolutionMessage(
   await flagBroadcastReplyIfAny(config.account_id, contactRecord.id)
 
   const inboundText = content.contentText ?? ''
+  const interactiveReplyId = content.interactiveReplyId ?? null
 
   const flowResult = await dispatchInboundToFlows({
     accountId: config.account_id,
     userId: config.user_id,
     contactId: contactRecord.id,
     conversationId: conversation.id,
-    message: { kind: 'text', text: inboundText, meta_message_id: rawMessageId },
+    message: interactiveReplyId
+      ? {
+          kind: 'interactive_reply',
+          reply_id: interactiveReplyId,
+          reply_title: inboundText,
+          meta_message_id: rawMessageId,
+        }
+      : { kind: 'text', text: inboundText, meta_message_id: rawMessageId },
     isFirstInboundMessage,
   })
   const flowConsumed = flowResult.consumed
@@ -654,9 +764,16 @@ async function processEvolutionMessage(
     | 'first_inbound_message'
     | 'new_message_received'
     | 'keyword_match'
+    | 'interactive_reply'
   )[] = []
   if (!flowConsumed) {
     automationTriggers.push('new_message_received', 'keyword_match')
+    // Interactive tap → fire the interactive_reply trigger too, same as
+    // the Meta webhook route — only meaningful when a button/list reply
+    // actually arrived, and skipped when a Flow already consumed it.
+    if (interactiveReplyId) {
+      automationTriggers.push('interactive_reply')
+    }
   }
   if (contactOutcome.wasCreated) automationTriggers.unshift('new_contact_created')
   if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
