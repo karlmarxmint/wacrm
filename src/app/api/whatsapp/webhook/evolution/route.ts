@@ -35,6 +35,7 @@ import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { buildMediaPath } from '@/lib/storage/upload-media'
 import { extensionForMime } from '@/lib/media/filename'
 import { readBodyWithLimit } from '@/lib/http/read-body-with-limit'
+import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
 
 export const maxDuration = 60
 
@@ -449,6 +450,33 @@ function extractContent(message: EvolutionMessage): ExtractedContent | null {
 }
 
 /**
+ * Resolves a tapped button/row's visible label from the
+ * `interactive_payload` the bot itself stored when it sent that exact
+ * prompt (see meta-send.ts's engineSendInteractiveButtons/List) — the
+ * fallback for when Evolution Go's buttonsResponseMessage/
+ * listResponseMessage didn't include a usable display text of its own.
+ * Returns null (never the id) so the caller can leave `contentText` as
+ * the id when no match is found rather than substitute an empty string.
+ */
+function resolveInteractiveOptionTitle(
+  payload: unknown,
+  replyId: string
+): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  const p = payload as Partial<InteractiveMessagePayload>
+  if (p.kind === 'buttons') {
+    return p.buttons?.find((b) => b.id === replyId)?.title ?? null
+  }
+  if (p.kind === 'list') {
+    for (const section of p.sections ?? []) {
+      const hit = section.rows?.find((r) => r.id === replyId)
+      if (hit) return hit.title
+    }
+  }
+  return null
+}
+
+/**
  * Evolution Go hands back the decrypted media inline as base64 on
  * `Message.base64` rather than a fetchable URL (confirmed live —
  * `Message.mediaUrl` is never actually populated despite what the field
@@ -623,15 +651,46 @@ async function processEvolutionMessage(
   if (dupe) return
 
   let replyToInternalId: string | null = null
+  let parentInteractivePayload: unknown = null
   const stanzaId = extractQuotedStanzaId(message)
   if (stanzaId) {
     const { data: parent } = await supabaseAdmin()
       .from('messages')
-      .select('id')
+      .select('id, interactive_payload')
       .eq('message_id', stanzaId)
       .eq('conversation_id', conversation.id)
       .maybeSingle()
     replyToInternalId = parent?.id ?? null
+    parentInteractivePayload = parent?.interactive_payload ?? null
+  }
+
+  // Evolution Go's buttonsResponseMessage frequently omits
+  // selectedDisplayText (confirmed live: a tap on the "existing" button
+  // came back with contentText === "existing", the raw reply_id, not
+  // its label) — a known whatsmeow/WhatsApp quirk, not a bug in our
+  // parsing. When that happens, resolve the human-readable label from
+  // the interactive_payload the bot itself stored when it SENT this
+  // exact prompt (meta-send.ts's engineSendInteractiveButtons/List
+  // persist `buttons`/`sections` there for exactly this round-trip).
+  // Prefer the message this reply actually quotes; fall back to the
+  // most recent interactive prompt in the conversation for clients that
+  // don't set contextInfo on a button/list tap.
+  if (content.interactiveReplyId && content.contentText === content.interactiveReplyId) {
+    let payload = parentInteractivePayload
+    if (!payload) {
+      const { data: lastPrompt } = await supabaseAdmin()
+        .from('messages')
+        .select('interactive_payload')
+        .eq('conversation_id', conversation.id)
+        .eq('sender_type', 'bot')
+        .eq('content_type', 'interactive')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      payload = lastPrompt?.interactive_payload ?? null
+    }
+    const resolvedTitle = resolveInteractiveOptionTitle(payload, content.interactiveReplyId)
+    if (resolvedTitle) content.contentText = resolvedTitle
   }
 
   const contentType = ALLOWED_CONTENT_TYPES.has(content.contentType)
